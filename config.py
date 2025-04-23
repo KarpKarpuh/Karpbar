@@ -5,6 +5,7 @@ PINNED_APPS = [
     "kitty",
     "firefox",
     "code-oss",
+    "mousepad"
 ]
 
 # Globale Overrides für **beliebige** Apps (nicht nur gepinnt)
