@@ -1,0 +1,54 @@
+.taskbar {
+    background-color: rgba(20, 20, 20, 0.6);
+    color: #FFFFFF;
+}
+
+.app-button {
+    background-color: transparent;
+    border: none;
+    padding: 0;
+}
+
+.app-button:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.app-button.focused {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+.app-button.focused:hover {
+    background-color: rgba(255, 255, 255, 0.25);
+}
+
+.indicator {
+    background-color: #00ff00;
+    border-radius: 1px;
+}
+
+.power-button {
+    background-color: transparent;
+    border: none;
+    padding: 4px;
+    border-radius: 4px;
+}
+
+.power-button:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.fallback-label {
+    font-weight: bold;
+    font-size: 13px;
+    color: white;
+    background-color: rgba(255, 255, 255, 0.12);
+    border-radius: 50%;
+    min-width: 32px;
+    min-height: 32px;
+    padding: 0;
+}
+
+.app-button:focus-visible,
+.power-button:focus-visible {
+    outline: none;
+}
