@@ -1,97 +1,110 @@
 #!/usr/bin/env python3
-import gi
-gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
-import subprocess
+from ctypes import CDLL
 import os
-from taskbar_data import generate_taskbar_data
+import subprocess
+import gi
+
+# Layer Shell lib laden
+try:
+    CDLL("libgtk4-layer-shell.so")
+except OSError as e:
+    print(f"⚠️ LayerShell konnte nicht geladen werden: {e}")
+
+gi.require_version('Gtk', '4.0')
+gi.require_version('Gtk4LayerShell', '1.0')
+from gi.repository import Gtk, Gdk, GLib, Gio, Gtk4LayerShell as LayerShell
+
+from config import PINNED_APPS
 
 ICON_SIZE = 24
-BAR_HEIGHT = 35
+BUTTON_SIZE = 40
 
-class Karpbar(Gtk.Window):
-    def __init__(self):
-        Gtk.Window.__init__(self, title="Karpbar")
-        self.set_decorated(False)
-        self.set_skip_taskbar_hint(True)
-        self.set_keep_above(True)
-        self.stick()
-        self.set_type_hint(Gdk.WindowTypeHint.DOCK)
+running_procs = {}
 
-        screen = self.get_screen()
-        monitor = screen.get_primary_monitor()
-        geometry = screen.get_monitor_geometry(monitor)
+def on_app_button_clicked(button, app_index):
+    app_info = PINNED_APPS[app_index]
+    if app_index in running_procs and running_procs[app_index].poll() is None:
+        print(f"{app_info['name']} läuft bereits.")
+        return
+    try:
+        proc = subprocess.Popen(app_info["exec"])
+        running_procs[app_index] = proc
+        print(f"{app_info['name']} gestartet mit PID {proc.pid}.")
+    except Exception as e:
+        print(f"❌ Fehler beim Start von {app_info['name']}: {e}")
 
-        self.set_size_request(geometry.width, BAR_HEIGHT)
-        self.move(geometry.x, geometry.y + geometry.height - (BAR_HEIGHT*1.325))
+def on_shutdown_clicked(button):
+    print("⏻ Karpbar wird geschlossen.")
+    Gtk.Application.get_default().quit()
 
-        # Rechteckiger Stil (kein Schatten, keine Rundung)
-        rgba = Gdk.RGBA()
-        rgba.parse("#2b303b")  # dunkelgrau
-        self.override_background_color(Gtk.StateFlags.NORMAL, rgba)
+def refresh_icons():
+    for idx, proc in list(running_procs.items()):
+        if proc.poll() is not None:
+            print(f"🛑 {PINNED_APPS[idx]['name']} wurde beendet.")
+            del running_procs[idx]
+    return True
 
-        self.box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        self.box.set_margin_start(10)
-        self.box.set_margin_end(10)
-        self.add(self.box)
+def on_activate(app):
+    window = Gtk.ApplicationWindow(application=app)
+    window.set_title("Karpbar")
+    window.set_decorated(False)
 
-        self.load_buttons()
-        GLib.timeout_add(1000, self.refresh)
+    # LayerShell Setup
+    LayerShell.init_for_window(window)
+    LayerShell.set_layer(window, LayerShell.Layer.BOTTOM)
+    LayerShell.set_anchor(window, LayerShell.Edge.BOTTOM, True)
+    LayerShell.set_anchor(window, LayerShell.Edge.LEFT, True)
+    LayerShell.set_anchor(window, LayerShell.Edge.RIGHT, True)
+    LayerShell.auto_exclusive_zone_enable(window)
 
-        quit_btn = Gtk.Button(label="⏻")
-        quit_btn.set_relief(Gtk.ReliefStyle.NONE)
-        quit_btn.connect("clicked", Gtk.main_quit)
-        self.box.pack_end(quit_btn, False, False, 5)
+    hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+    window.set_child(hbox)
 
-        self.show_all()
+    # App Buttons
+    for idx, app in enumerate(PINNED_APPS):
+        button = Gtk.Button()
+        button.set_size_request(BUTTON_SIZE, BUTTON_SIZE)
+        button.set_margin_start(3)
+        button.set_margin_end(3)
 
-    def load_buttons(self):
-        self.buttons = []
-        apps = generate_taskbar_data()
+        icon_path = app.get("icon", "")
+        if icon_path and os.path.isfile(icon_path):
+            image = Gtk.Image.new_from_file(icon_path)
+            image.set_pixel_size(ICON_SIZE)
+            button.set_child(image)
+        else:
+            label = Gtk.Label(label=app["name"][:2].upper())
+            button.set_child(label)
 
-        for app in apps:
-            btn = Gtk.Button()
-            btn.set_tooltip_text(app.get("tooltip", app["name"]))
-            btn.set_relief(Gtk.ReliefStyle.NONE)
-            btn.set_size_request(30, 30)
+        button.connect("clicked", on_app_button_clicked, idx)
+        hbox.append(button)
 
-            content = self.create_icon_or_label(app)
-            btn.add(content)
+    # Spacer
+    spacer = Gtk.Box()
+    spacer.set_hexpand(True)
+    hbox.append(spacer)
 
-            btn.connect("clicked", self.on_app_click, app)
-            self.box.pack_start(btn, False, False, 0)
-            self.buttons.append(btn)
+    # Power Button
+    power_button = Gtk.Button()
+    power_button.set_size_request(BUTTON_SIZE, BUTTON_SIZE)
+    power_button.set_child(Gtk.Label(label="⏻"))
+    power_button.connect("clicked", on_shutdown_clicked)
+    hbox.append(power_button)
 
-    def create_icon_or_label(self, app):
-        if app["icon"] and os.path.exists(app["icon"]):
-            try:
-                pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
-                    filename=app["icon"],
-                    width=ICON_SIZE,
-                    height=ICON_SIZE,
-                    preserve_aspect_ratio=True
-                )
-                image = Gtk.Image.new_from_pixbuf(pixbuf)
-                return image
-            except Exception as e:
-                print(f"⚠️ Fehler beim Laden von {app['icon']}: {e}")
-        fallback = app["name"][:2].upper()
-        label = Gtk.Label(label=fallback)
-        label.set_margin_top(6)
-        label.set_margin_bottom(6)
-        return label
+    # CSS
+    css = Gtk.CssProvider()
+    css.load_from_data(b"""
+        button {
+            border: none;
+            padding: 4px;
+        }
+    """)
+    display = Gdk.Display.get_default()
+    Gtk.StyleContext.add_provider_for_display(display, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
-    def on_app_click(self, button, app):
-        print(f"🔘 Klick auf {app['name']}")
-        subprocess.Popen(["python3", "focus_or_launch.py", app["exec"]])
+    window.present()
+    GLib.timeout_add(1000, refresh_icons)
 
-    def refresh(self):
-        for btn in self.buttons:
-            self.box.remove(btn)
-        self.load_buttons()
-        self.show_all()
-        return True
-
-if __name__ == "__main__":
-    Karpbar()
-    Gtk.main()
+app = Gtk.Application(application_id="com.example.Karpbar")
+app.connect("activate", on_activate)
+app.run(None)
