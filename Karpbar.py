@@ -16,8 +16,12 @@ from gi.repository import Gtk, Gdk, GLib, Gio, Gtk4LayerShell as LayerShell
 
 from config import PINNED_APPS
 
-ICON_SIZE = 24
-BUTTON_SIZE = 40
+# Konfiguration
+APP_BUTTON_SIZE = 36
+APP_ICON_SIZE = 20
+APP_SPACING = 3
+POWER_BUTTON_SIZE = 36
+POWER_ICON_SIZE = 18
 
 running_procs = {}
 
@@ -44,6 +48,13 @@ def refresh_icons():
             del running_procs[idx]
     return True
 
+def create_centered_widget(widget):
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+    box.set_valign(Gtk.Align.CENTER)
+    box.set_halign(Gtk.Align.CENTER)
+    box.append(widget)
+    return box
+
 def on_activate(app):
     window = Gtk.ApplicationWindow(application=app)
     window.set_title("Karpbar")
@@ -60,43 +71,51 @@ def on_activate(app):
     hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
     window.set_child(hbox)
 
-    # App Buttons
+    # === App Buttons ===
     for idx, app in enumerate(PINNED_APPS):
-        button = Gtk.Button()
-        button.set_size_request(BUTTON_SIZE, BUTTON_SIZE)
-        button.set_margin_start(3)
-        button.set_margin_end(3)
-
         icon_path = app.get("icon", "")
         if icon_path and os.path.isfile(icon_path):
             image = Gtk.Image.new_from_file(icon_path)
-            image.set_pixel_size(ICON_SIZE)
-            button.set_child(image)
+            image.set_pixel_size(APP_ICON_SIZE)
+            content = create_centered_widget(image)
         else:
             label = Gtk.Label(label=app["name"][:2].upper())
-            button.set_child(label)
+            content = create_centered_widget(label)
 
+        button = Gtk.Button()
+        button.set_child(content)
+        button.set_size_request(APP_BUTTON_SIZE, APP_BUTTON_SIZE)
+        button.set_valign(Gtk.Align.CENTER)
+        button.set_halign(Gtk.Align.CENTER)
+        button.set_margin_start(APP_SPACING)
+        button.set_margin_end(APP_SPACING)
         button.connect("clicked", on_app_button_clicked, idx)
+
         hbox.append(button)
 
-    # Spacer
+    # === Spacer ===
     spacer = Gtk.Box()
     spacer.set_hexpand(True)
     hbox.append(spacer)
 
-    # Power Button
+    # === Power Button ===
+    power_label = Gtk.Label(label="⏻")
+    power_content = create_centered_widget(power_label)
+
     power_button = Gtk.Button()
-    power_button.set_size_request(BUTTON_SIZE, BUTTON_SIZE)
-    power_button.set_child(Gtk.Label(label="⏻"))
+    power_button.set_child(power_content)
+    power_button.set_size_request(POWER_BUTTON_SIZE, POWER_BUTTON_SIZE)
+    power_button.set_valign(Gtk.Align.CENTER)
+    power_button.set_halign(Gtk.Align.CENTER)
     power_button.connect("clicked", on_shutdown_clicked)
     hbox.append(power_button)
 
-    # CSS
+    # === CSS ===
     css = Gtk.CssProvider()
     css.load_from_data(b"""
         button {
             border: none;
-            padding: 4px;
+            padding: 0;
         }
     """)
     display = Gdk.Display.get_default()

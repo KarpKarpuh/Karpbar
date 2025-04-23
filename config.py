@@ -12,11 +12,6 @@ PINNED_APPS = [
         "exec": "firefox"
     },
     {
-        "name": "mousepad",
-        "icon": "",  # Wird durch Fallback ersetzt
-        "exec": "mousepad"
-    },
-    {
         "name": "code-oss",
         "icon": "/usr/share/pixmaps/com.visualstudio.code.oss.png",
         "exec": "code"
