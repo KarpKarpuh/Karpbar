@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-from ctypes import CDLL
 import os
 import subprocess
+from ctypes import CDLL
 import gi
 
 # Layer Shell laden
@@ -20,84 +20,82 @@ from gi.repository import Gtk, Gdk, Gio, GLib, Gtk4LayerShell as LayerShell
 from config import PINNED_APPS, APP_CONFIG
 from window_manager import get_windows
 
-# Konfigurierbare Größen
-ICON_SIZE = 20                                 # App-Icon-Größe
-BUTTON_SIZE = 28                               # Button-Quadrat-Größe
-SPACING_BETWEEN_APP_BUTTONS = 3               # Horizontaler Abstand zwischen Buttons
-ICON_INDICATOR_SPACING = 3                    # Abstand Icon–Indikator (oben)
-INDICATOR_HEIGHT = 3                          # Indikator-Höhe
-INDICATOR_WIDTH = 14                          # Indikator-Breite
-INDICATOR_BOTTOM_SPACING = 2                  # Abstand Indikator–Boden der Taskbar
+# ─── Konfigurierbare Größen ────────────────────────────────────────────────────
+ICON_SIZE               = 22    # Breite/Höhe des Icons oder Fallback-Labels
+BUTTON_WIDTH            = 36    # Breite des Buttons
+BUTTON_HEIGHT           = 30    # Höhe des Buttons (inkl. Indikator unten)
+SPACING_BETWEEN_BUTTONS = 3     # Horizontaler Abstand zwischen den Buttons
+ICON_INDICATOR_SPACING  = 1     # Vertikaler Abstand Icon → Indikator
+INDICATOR_HEIGHT        = 3     # Höhe des Indikators
+INDICATOR_WIDTH         = 14    # Breite des Indikators
+# ────────────────────────────────────────────────────────────────────────────────
 
-# IconTheme für das aktuelle Display
-display = Gdk.Display.get_default()
+display    = Gdk.Display.get_default()
 icon_theme = Gtk.IconTheme.get_for_display(display)
-
-# hält laufende Prozesse
 running_procs: dict[str, subprocess.Popen] = {}
 
+
 def on_app_button_clicked(button, exec_cmd: str):
-    """Startet oder fokussiert die Anwendung."""
     key = exec_cmd.split()[0].lower()
     proc = running_procs.get(key)
     if proc and proc.poll() is None:
-        print(f"{key} läuft bereits.")
         return
     try:
-        new_proc = subprocess.Popen(exec_cmd.split())
-        running_procs[key] = new_proc
-        print(f"{key} gestartet mit PID {new_proc.pid}.")
+        running_procs[key] = subprocess.Popen(exec_cmd.split())
     except Exception as e:
         print(f"❌ Fehler beim Start von {key}: {e}")
 
+
 def on_shutdown_clicked(button):
-    """Beendet die Taskbar und die Anwendung."""
-    print("⏻ Karpbar wird geschlossen.")
     Gtk.Application.get_default().quit()
 
+
 def create_app_button(app_name: str, is_running: bool = False) -> Gtk.Widget:
-    """
-    Erzeugt einen Button für die angegebene App.
-    Fügt einen kleinen Indikator hinzu, wenn die App läuft.
-    Nutzt APP_CONFIG für Overrides (icon, exec).
-    """
-    name = app_name.lower()
-    cfg = APP_CONFIG.get(name, {})
+    """Variant 1: kein Spacer, Abstand via spacing und margin_top."""
+    name     = app_name.lower()
+    cfg      = APP_CONFIG.get(name, {})
     exec_cmd = cfg.get("exec", name)
 
-    total_height = BUTTON_SIZE + INDICATOR_HEIGHT + INDICATOR_BOTTOM_SPACING
+    # Button-Größe setzen
     button = Gtk.Button()
-    button.set_size_request(BUTTON_SIZE, total_height)
-    button.set_margin_start(SPACING_BETWEEN_APP_BUTTONS)
-    button.set_margin_end(SPACING_BETWEEN_APP_BUTTONS)
+    button.set_size_request(BUTTON_WIDTH, BUTTON_HEIGHT)
+    button.set_margin_start(SPACING_BETWEEN_BUTTONS)
+    button.set_margin_end(SPACING_BETWEEN_BUTTONS)
+    button.set_hexpand(False)
+    button.set_vexpand(False)
 
+    # VBox mit spacing = ICON_INDICATOR_SPACING, keine Expansion
     vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=ICON_INDICATOR_SPACING)
+    vbox.set_halign(Gtk.Align.CENTER)
+    vbox.set_valign(Gtk.Align.CENTER)
+    vbox.set_hexpand(False)
+    vbox.set_vexpand(False)
 
-    # Icon laden
+    # Icon oder Fallback-Label
     icon_path = cfg.get("icon", "")
     if icon_path and os.path.isfile(icon_path):
-        image = Gtk.Image.new_from_file(icon_path)
-        image.set_pixel_size(ICON_SIZE)
+        icon_widget = Gtk.Image.new_from_file(icon_path)
+        icon_widget.set_pixel_size(ICON_SIZE)
     else:
-        image = None
+        icon_widget = None
         for key in (name, exec_cmd.split()[0].lower()):
             if icon_theme.has_icon(key):
-                themed = Gio.ThemedIcon.new(key)
-                image = Gtk.Image.new_from_gicon(themed)
-                image.set_pixel_size(ICON_SIZE)
+                icon_widget = Gtk.Image.new_from_gicon(Gio.ThemedIcon.new(key))
+                icon_widget.set_pixel_size(ICON_SIZE)
                 break
-        if image is None:
-            image = Gtk.Label(label=name[:2].upper())
+        if icon_widget is None:
+            icon_widget = Gtk.Label(label=name[:2].upper())
 
-    image.set_valign(Gtk.Align.CENTER)
-    image.set_halign(Gtk.Align.CENTER)
-    vbox.append(image)
+    icon_widget.set_size_request(ICON_SIZE, ICON_SIZE)
+    icon_widget.set_halign(Gtk.Align.CENTER)
+    icon_widget.set_valign(Gtk.Align.CENTER)
+    vbox.append(icon_widget)
 
-    # Indikator immer anzeigen (grau oder grün)
+    # Indikator direkt nach Icon mit margin_top
     indicator = Gtk.Box()
     indicator.set_size_request(INDICATOR_WIDTH, INDICATOR_HEIGHT)
+    indicator.set_margin_top(ICON_INDICATOR_SPACING)
     indicator.set_halign(Gtk.Align.CENTER)
-    indicator.set_margin_bottom(INDICATOR_BOTTOM_SPACING)
     indicator.add_css_class("indicator")
     if is_running:
         indicator.add_css_class("active")
@@ -107,42 +105,38 @@ def create_app_button(app_name: str, is_running: bool = False) -> Gtk.Widget:
     button.connect("clicked", on_app_button_clicked, exec_cmd)
     return button
 
+
 def build_taskbar_box() -> Gtk.Box:
-    hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+    hbox    = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+    running = {w['class'].lower() for w in get_windows()}
 
-    running_windows = get_windows()
-    running_set = {w["class"].lower() for w in running_windows}
-
-    # Gepinnte Apps
     for name in PINNED_APPS:
-        lower = name.lower()
-        is_running = lower in running_set
-        hbox.append(create_app_button(name, is_running))
+        btn = create_app_button(name, name.lower() in running)
+        hbox.append(btn)
 
-    # Dynamische Fenster
-    pinned_set = {n.lower() for n in PINNED_APPS}
-    seen: set[str] = set()
-    for win in running_windows:
-        cls = win.get("class", "").lower()
-        if cls and cls not in pinned_set and cls not in seen:
+    pinned = {n.lower() for n in PINNED_APPS}
+    seen   = set()
+    for w in get_windows():
+        cls = w.get('class', '').lower()
+        if cls and cls not in pinned and cls not in seen:
             seen.add(cls)
             hbox.append(create_app_button(cls, True))
 
-    # Spacer + Power-Button
     spacer = Gtk.Box(); spacer.set_hexpand(True); hbox.append(spacer)
-    power_btn = Gtk.Button(); power_btn.set_size_request(BUTTON_SIZE, BUTTON_SIZE)
-    power_btn.set_child(Gtk.Label(label="⏻")); power_btn.connect("clicked", on_shutdown_clicked)
+
+    power_btn = Gtk.Button()
+    power_btn.set_size_request(BUTTON_WIDTH, BUTTON_HEIGHT)
+    power_btn.set_hexpand(False)
+    power_btn.set_vexpand(False)
+    power_btn.set_child(Gtk.Label(label="⏻"))
+    power_btn.connect("clicked", on_shutdown_clicked)
     hbox.append(power_btn)
 
     return hbox
 
-def refresh(window: Gtk.Window) -> bool:
-    window.set_child(build_taskbar_box())
-    return True
 
 def on_activate(app: Gtk.Application):
     win = Gtk.ApplicationWindow(application=app)
-    win.set_title("Karpbar")
     win.set_decorated(False)
 
     LayerShell.init_for_window(win)
@@ -151,22 +145,24 @@ def on_activate(app: Gtk.Application):
         LayerShell.set_anchor(win, edge, True)
     LayerShell.auto_exclusive_zone_enable(win)
 
-    # CSS: Standard-Indikator grau, aktive Apps grün
     css = Gtk.CssProvider()
     css.load_from_data(b"""
-        button { border: none; padding-top:4px; padding-bottom:0px; padding-left:4px; padding-right:4px; }
-        .indicator { background-color: rgba(128,128,128,0.5); border-radius:1px; }
+        button { border: none; margin: 0; padding: 0; }
+        .indicator { background-color: rgba(128,128,128,0.5); border-radius: 1px; }
         .indicator.active { background-color: rgba(0,160,0,0.8); }
     """)
     Gtk.StyleContext.add_provider_for_display(
-        Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        Gdk.Display.get_default(),
+        css,
+        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
     )
 
     win.set_child(build_taskbar_box())
     win.present()
-    GLib.timeout_add(1000, lambda: refresh(win))
+    GLib.timeout_add(1000, lambda: (win.set_child(build_taskbar_box()), True))
+
 
 if __name__ == '__main__':
     app = Gtk.Application(application_id="com.example.Karpbar")
-    app.connect("activate", on_activate)
+    app.connect('activate', on_activate)
     app.run(None)
