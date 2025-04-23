@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from ctypes import CDLL
+import os
 import subprocess
 import gi
 
@@ -16,86 +17,98 @@ gi.require_version('Gio', '2.0')
 gi.require_version('Gtk4LayerShell', '1.0')
 from gi.repository import Gtk, Gdk, Gio, GLib, Gtk4LayerShell as LayerShell
 
-from config import PINNED_APPS
+from config import PINNED_APPS, APP_CONFIG
 from window_manager import get_windows
 
-# Konstanten für Größen
+# Größen-Konstanten
 ICON_SIZE = 20
 BUTTON_SIZE = 36
 SPACING_BETWEEN_APP_BUTTONS = 3
 
-# IconTheme für das Display holen
+# IconTheme für das aktuelle Display
 display = Gdk.Display.get_default()
 icon_theme = Gtk.IconTheme.get_for_display(display)
 
-running_procs = {}
+# hält laufende Prozesse
+running_procs: dict[str, subprocess.Popen] = {}
 
-def on_app_button_clicked(button, app_info):
-    exec_key = app_info["exec"].split()[0].lower()
-    proc = running_procs.get(exec_key)
+def on_app_button_clicked(button, exec_cmd: str):
+    """Startet oder fokussiert die Anwendung."""
+    key = exec_cmd.split()[0].lower()
+    proc = running_procs.get(key)
     if proc and proc.poll() is None:
-        print(f"{app_info['name']} läuft bereits.")
+        print(f"{key} läuft bereits.")
         return
     try:
-        new_proc = subprocess.Popen(app_info["exec"].split())
-        running_procs[exec_key] = new_proc
-        print(f"{app_info['name']} gestartet mit PID {new_proc.pid}.")
+        new_proc = subprocess.Popen(exec_cmd.split())
+        running_procs[key] = new_proc
+        print(f"{key} gestartet mit PID {new_proc.pid}.")
     except Exception as e:
-        print(f"❌ Fehler beim Start von {app_info['name']}: {e}")
+        print(f"❌ Fehler beim Start von {key}: {e}")
 
 def on_shutdown_clicked(button):
+    """Beendet die Taskbar und die Anwendung."""
     print("⏻ Karpbar wird geschlossen.")
     Gtk.Application.get_default().quit()
 
+def create_app_button(app_name: str) -> Gtk.Widget:
+    """
+    Erzeugt einen Button für die angegebene App.
+    Nutzt APP_CONFIG für Overrides (icon, exec).
+    """
+    name = app_name.lower()
+    cfg = APP_CONFIG.get(name, {})
+    exec_cmd = cfg.get("exec", name)
 
-def create_app_button(app_info):
+    # Button-Grundstruktur
     button = Gtk.Button()
     button.set_size_request(BUTTON_SIZE, BUTTON_SIZE)
     button.set_margin_start(SPACING_BETWEEN_APP_BUTTONS)
     button.set_margin_end(SPACING_BETWEEN_APP_BUTTONS)
 
-    # Icon aus IconTheme laden: zuerst Name, dann exec-Befehl
-    exec_cmd = app_info["exec"].split()[0].lower()
-    icon_candidates = [app_info["name"].lower(), exec_cmd]
-    image = None
-    for icon_name in icon_candidates:
-        if icon_theme.has_icon(icon_name):
-            themed_icon = Gio.ThemedIcon.new(icon_name)
-            image = Gtk.Image.new_from_gicon(themed_icon)
-            image.set_pixel_size(ICON_SIZE)
-            break
-    # Fallback: Label mit Kürzel
-    if image is None:
-        image = Gtk.Label(label=exec_cmd[:2].upper())
+    # 1) Icon-Override aus config
+    icon_path = cfg.get("icon", "")
+    if icon_path and os.path.isfile(icon_path):
+        image = Gtk.Image.new_from_file(icon_path)
+        image.set_pixel_size(ICON_SIZE)
+    else:
+        # 2) ThemedIcon per Name oder Exec-Befehl
+        image = None
+        for key in (name, exec_cmd.split()[0].lower()):
+            if icon_theme.has_icon(key):
+                themed = Gio.ThemedIcon.new(key)
+                image = Gtk.Image.new_from_gicon(themed)
+                image.set_pixel_size(ICON_SIZE)
+                break
+        # 3) Fallback: Kurz-Label
+        if image is None:
+            image = Gtk.Label(label=name[:2].upper())
 
     image.set_valign(Gtk.Align.CENTER)
     image.set_halign(Gtk.Align.CENTER)
     button.set_child(image)
-    button.connect("clicked", on_app_button_clicked, app_info)
+    button.connect("clicked", on_app_button_clicked, exec_cmd)
     return button
 
-
-def build_taskbar_box():
+def build_taskbar_box() -> Gtk.Box:
+    """Erzeugt die horizontale Taskbar mit Pinned- und dynamischen Apps."""
     hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
 
     # Pinned Apps
-    for app in PINNED_APPS:
-        hbox.append(create_app_button(app))
+    for name in PINNED_APPS:
+        hbox.append(create_app_button(name))
 
-    # Dynamische Fenster hinzufügen
+    # Dynamische Fenster (neben Pinned)
     running_windows = get_windows()
-    pinned_names = {a["name"].lower() for a in PINNED_APPS}
-    seen = set()
+    pinned_set = {n.lower() for n in PINNED_APPS}
+    seen: set[str] = set()
     for win in running_windows:
         cls = win.get("class", "").lower()
-        if cls and cls not in pinned_names and cls not in seen:
+        if cls and cls not in pinned_set and cls not in seen:
             seen.add(cls)
-            hbox.append(create_app_button({
-                "name": cls,
-                "exec": cls
-            }))
+            hbox.append(create_app_button(cls))
 
-    # Spacer nach rechts
+    # Spacer für rechtsbündige Elemente
     spacer = Gtk.Box()
     spacer.set_hexpand(True)
     hbox.append(spacer)
@@ -109,13 +122,12 @@ def build_taskbar_box():
 
     return hbox
 
-
-def refresh(window):
+def refresh(window: Gtk.Window) -> bool:
+    """Ersetzt den Inhalt des Fensters mit aktueller Taskbar."""
     window.set_child(build_taskbar_box())
     return True
 
-
-def on_activate(app):
+def on_activate(app: Gtk.Application):
     win = Gtk.ApplicationWindow(application=app)
     win.set_title("Karpbar")
     win.set_decorated(False)
@@ -128,9 +140,9 @@ def on_activate(app):
 
     win.set_child(build_taskbar_box())
 
-    # Einfaches CSS für Buttons
+    # Einfaches CSS für saubere Buttons
     css = Gtk.CssProvider()
-    css.load_from_data(b"button { border: none; padding: 4px; }")
+    css.load_from_data(b"button { border: none; padding: 4px; }\n")
     Gtk.StyleContext.add_provider_for_display(
         Gdk.Display.get_default(), css,
         Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION

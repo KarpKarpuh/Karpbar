@@ -1,45 +1,46 @@
-# ~/Karpbar/taskbar_data.py
-
-from config import PINNED_APPS
+#!/usr/bin/env python3
+from config import PINNED_APPS, APP_CONFIG
 from window_manager import get_windows
 
+
 def generate_taskbar_data():
+    """
+    Erstellt eine Liste von Tasks für die gepinnten Apps:
+    - name: App-Name
+    - icon: Pfad (oder leer)
+    - exec: Befehl zum Starten
+    - running: bool
+    - focused: bool
+    """
     windows = get_windows()
+    running_classes = {w["class"].lower() for w in windows}
+
     tasks = []
+    for name in PINNED_APPS:
+        lower = name.lower()
+        cfg = APP_CONFIG.get(lower, {})
+        icon = cfg.get("icon", "")
+        exec_cmd = cfg.get("exec", lower)
 
-    # Alle Klassen extrahieren (klein geschrieben für Robustheit)
-    running_classes = {win["class"].lower() for win in windows}
-
-    print("🧠 Generiere Taskbar-Daten:")
-    for entry in PINNED_APPS:
-        app_class = entry["name"].lower()
-        is_running = app_class in running_classes
-
-        # Ist ein Fenster dieser Klasse fokussiert?
+        is_running = lower in running_classes
         focused = any(
-            win for win in windows
-            if win["class"].lower() == app_class and win["focused"]
+            w for w in windows
+            if w["class"].lower() == lower and w["focused"]
         )
 
-        task = {
-            "name": entry["name"],  # original behalten für Anzeige
-            "icon": entry["icon"],
-            "exec": entry["exec"],
+        tasks.append({
+            "name": name,
+            "icon": icon,
+            "exec": exec_cmd,
             "running": is_running,
             "focused": focused
-        }
-
-        status = "🟢" if is_running else "⚪"
-        star = "⭐" if focused else ""
-        print(f"{status} {entry['name']:<10} {star}")
-
-        tasks.append(task)
+        })
 
     return tasks
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     from pprint import pprint
     data = generate_taskbar_data()
-    print("\n🔽 Taskbar Struktur:")
+    print("🔽 Taskbar Struktur:")
     pprint(data)
