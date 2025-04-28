@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
+from ctypes import CDLL
+import sys
+try:
+    # versucht, gtk4-layer-shell in den Prozess zu laden
+    CDLL("libgtk4-layer-shell.so")
+except OSError as e:
+    print(f"⚠️  Could not preload libgtk4-layer-shell: {e}", file=sys.stderr)
 import gi
 import os
-import sys
 try:
     gi.require_version("Gtk", "4.0")
     gi.require_version("Gtk4LayerShell", "1.0")

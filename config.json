@@ -2,7 +2,9 @@
     "button_width": 36,
     "button_height": 36,
     "icon_size": 32,
+    "indicator_width": 14,
     "indicator_height": 3,
+
     "pinned_apps": [
         {
             "class": "firefox",

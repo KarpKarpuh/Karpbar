@@ -2,32 +2,41 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, Gdk, GdkPixbuf, GObject
 import subprocess
-from window_manager import focus_window_by_class, close_window_by_class
+import os
+
+from window_manager import get_windows, focus_window_by_class, close_window_by_class
+
+# Globales Dict zum Verwalten gestarteter Prozesse (optional)
+running_procs: dict[str, subprocess.Popen] = {}
 
 class AppButton(Gtk.Button):
-    def __init__(self, app_class, icon_path=None, exec_cmd=None, pinned=False, icon_size=32):
+    def __init__(self, app_class, icon_path=None, exec_cmd=None, pinned=False, config=None):
         super().__init__()
         self.app_class = app_class
-        self.exec_cmd = exec_cmd
+        self.exec_cmd = exec_cmd or app_class
         self.pinned = pinned
         self.is_running = False
         self.is_focused = False
-        self.icon_size = icon_size
+        self.config = config or {}
+
+        self.icon_size = self.config.get("icon_size", 32)
+        indicator_width = self.config.get("indicator_width", 8)
+        indicator_height = self.config.get("indicator_height", 3)
 
         self.add_css_class("app-button")
 
-        # === ICON AUSWÄHLEN UND WRAPPEN ===
+        # Icon laden oder Fallback
         if icon_path:
             try:
                 pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
                     filename=icon_path,
-                    width=icon_size,
-                    height=icon_size,
+                    width=self.icon_size,
+                    height=self.icon_size,
                     preserve_aspect_ratio=True
                 )
                 image = Gtk.Image.new()
                 image.set_from_pixbuf(pixbuf)
-                image.set_pixel_size(icon_size)
+                image.set_pixel_size(self.icon_size)
                 icon_widget = self._wrap_icon_widget(image)
             except Exception as e:
                 print(f"Warnung: Konnte Icon nicht laden: {e}")
@@ -36,40 +45,40 @@ class AppButton(Gtk.Button):
             icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
             if icon_theme and icon_theme.has_icon(self.app_class):
                 image = Gtk.Image.new_from_icon_name(self.app_class)
-                image.set_pixel_size(icon_size)
+                image.set_pixel_size(self.icon_size)
                 icon_widget = self._wrap_icon_widget(image)
             else:
                 icon_widget = self._build_fallback_icon()
 
-        # === BUTTON-GRÖSSE FESTLEGEN ===
-        self.set_size_request(icon_size + 4, icon_size + 10)
+        self.set_size_request(self.icon_size + 4, self.icon_size + 10)
         self.set_valign(Gtk.Align.FILL)
         self.set_halign(Gtk.Align.CENTER)
 
-        # === INDIKATOR ===
         self.indicator = Gtk.Box()
         self.indicator.add_css_class("indicator")
         self.indicator.set_visible(False)
-        self.indicator.set_halign(Gtk.Align.FILL)
+        self.indicator.set_halign(Gtk.Align.CENTER)
         self.indicator.set_valign(Gtk.Align.END)
+        self.indicator.set_size_request(indicator_width, indicator_height)
 
-        # === LAYOUT ===
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         vbox.set_halign(Gtk.Align.CENTER)
         vbox.set_valign(Gtk.Align.CENTER)
-        vbox.set_size_request(icon_size + 4, icon_size + 10)
+        vbox.set_size_request(self.icon_size + 4, self.icon_size + 10)
         vbox.append(icon_widget)
         vbox.append(self.indicator)
         self.set_child(vbox)
 
-        # === EVENTS ===
+        # Linksklick: Start oder Fokus
         self.connect("clicked", self.on_left_click)
 
+        # Rechtsklick-Geste
         self.right_click = Gtk.GestureClick()
         self.right_click.set_button(3)
         self.right_click.connect("released", self.on_right_click)
         self.add_controller(self.right_click)
 
+        # Drag & Drop (Reihenfolge)
         drag_source = Gtk.DragSource()
         drag_source.set_actions(Gdk.DragAction.MOVE)
         drag_source.connect("prepare", self.on_drag_prepare)
@@ -129,16 +138,24 @@ class AppButton(Gtk.Button):
         self.popover.set_autohide(True)
 
     def on_left_click(self, button):
-        if self.is_running:
-            focus_window_by_class(self.app_class)
-        else:
-            if self.exec_cmd:
-                try:
-                    subprocess.Popen(self.exec_cmd.split(),
-                                     stdout=subprocess.DEVNULL,
-                                     stderr=subprocess.DEVNULL)
-                except Exception as e:
-                    print(f"Fehler beim Starten von {self.app_class}: {e}")
+        """Startet oder fokussiert die Anwendung."""
+        exec_cmd = self.exec_cmd
+        key = exec_cmd.split()[0].lower()
+
+        # Existierende Fenster prüfen
+        windows = get_windows()
+        if any(w.get("class", "").lower() == key for w in windows):
+            focus_window_by_class(key)
+            print(f"{key} läuft bereits und wurde fokussiert.")
+            return
+
+        # Kein Fenster gefunden: neuen Prozess starten
+        try:
+            new_proc = subprocess.Popen(exec_cmd.split())
+            running_procs[key] = new_proc
+            print(f"{key} gestartet mit PID {new_proc.pid}.")
+        except Exception as e:
+            print(f"❌ Fehler beim Start von {key}: {e}")
 
     def on_right_click(self, gesture, n_press, x, y):
         if self.popover:
@@ -160,7 +177,7 @@ class AppButton(Gtk.Button):
             self.pin_menu_item.set_label("Entpinnen")
             new_entry = {
                 "class": self.app_class,
-                "exec": self.exec_cmd or self.app_class,
+                "exec": self.exec_cmd,
                 "icon": None
             }
             config_data.setdefault("pinned_apps", []).append(new_entry)
