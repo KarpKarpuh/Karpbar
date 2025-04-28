@@ -1,14 +1,14 @@
-# config_loader.py
-
 import json
 import os
+import sys
 
-config_data = {}  # Globale Konfigurationsdaten
+# Globale Konfigurationsdaten
+config_data = {}
 
 def load_config(path=None):
     """
     Lädt die Konfigurationsdatei (JSON) und stellt die Daten in config_data bereit.
-    Falls kein Pfad angegeben, wird 'config.json' im gleichen Verzeichnis verwendet.
+    Falls kein Pfad angegeben, wird 'config.json' im Modul-Verzeichnis verwendet.
     """
     global config_data
     if path is None:
@@ -23,7 +23,7 @@ def load_config(path=None):
 
 def get_config():
     """
-    Gibt die geladene Konfiguration zurück. Stellt sicher, dass zuvor load_config() aufgerufen wurde.
+    Gibt die geladene Konfiguration zurück. Lädt sie bei Bedarf nach.
     """
     if not config_data:
         load_config()
@@ -42,3 +42,18 @@ def save_config(path=None):
             json.dump(config_data, f, indent=4)
     except Exception as e:
         print(f"Fehler beim Speichern der Konfigurationsdatei: {e}", file=sys.stderr)
+
+def get_pinned_apps():
+    """
+    Liefert die Liste der gepinnten App-Klassen (Strings).
+    """
+    cfg = get_config()
+    return cfg.get("pinned_apps", [])
+
+def get_app_overrides():
+    """
+    Liefert das Dict aller app_overrides, 
+    Keys sind App-Klassen, Values sind dicts mit optionalen 'exec' und 'icon'.
+    """
+    cfg = get_config()
+    return cfg.get("app_overrides", {})

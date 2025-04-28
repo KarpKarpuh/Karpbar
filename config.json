@@ -1,30 +1,17 @@
 {
-    "button_width": 36,
-    "button_height": 36,
     "icon_size": 32,
     "indicator_width": 14,
     "indicator_height": 3,
+
     "pinned_apps": [
-        {
-            "class": "333"
-        },
-        {
-            "class": "55555"
-        },
-        {
-            "class": "firefox"
-        },
-        {
-            "class": "666666"
-        },
-        {
-            "class": "7777777"
-        },
-        {
-            "class": "1"
-        },
-        {
-            "class": "22"
+        "kitty",
+        "firefox",
+        "code-oss"
+    ],
+
+    "app_overrides": {
+        "code": {
+            "exec": "code-oss"
         }
-    ]
+    }
 }

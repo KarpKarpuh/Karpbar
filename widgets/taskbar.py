@@ -16,12 +16,12 @@ class Taskbar:
         self.task_order = []
         self.current_page = 1
 
-        # Haupt-Container als horizontiale Box
+        # Haupt-Container als horizontale Box
         self.container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self.container.set_margin_top(0)
         self.container.set_margin_bottom(0)
 
-        # linker Spacer: verschiebt alles ab Bildschirmmitte nach linksbündig
+        # Linker Spacer: verschiebt Buttons ab Bildschirmmitte nach linksbündig
         self.left_spacer = Gtk.Box()
         display = Gdk.Display.get_default()
         half_width = 0
@@ -38,11 +38,9 @@ class Taskbar:
         self.tasks_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self.container.append(self.tasks_box)
 
-        # Vertikale Box für die Pfeiltasten
+        # Vertikale Box für Paging-Pfeile
         arrow_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         arrow_box.set_valign(Gtk.Align.END)
-        arrow_box.set_margin_bottom(0)
-        arrow_box.set_margin_top(0)
 
         # Page-Up Button
         up_icon = Gtk.Image.new_from_icon_name("go-up-symbolic")
@@ -62,18 +60,17 @@ class Taskbar:
         self.page_down_button.connect("clicked", lambda _: self.on_page_down())
         arrow_box.append(self.page_down_button)
 
-        # Pfeiltasten initial ausblenden
+        # Anfangs ausblenden
         self.page_up_button.set_visible(False)
         self.page_down_button.set_visible(False)
 
         self.container.append(arrow_box)
 
-        # rechter Spacer: schiebt Power-Button ans rechte Ende
+        # Rechter Spacer + Power-Button
         right_spacer = Gtk.Box()
         right_spacer.set_hexpand(True)
         self.container.append(right_spacer)
 
-        # Power-Button (Shutdown)
         power_icon = Gtk.Image.new_from_icon_name("system-shutdown")
         power_icon.set_pixel_size(24)
         power_button = Gtk.Button()
@@ -83,32 +80,32 @@ class Taskbar:
         power_button.connect("clicked", lambda _: Gtk.Application.get_default().quit())
         self.container.append(power_button)
 
-        # Styling und Export als Widget
         self.container.add_css_class("taskbar")
         self.widget = self.container
 
-        # Initialbefüllung: gepinnte und laufende Apps (case-insensitive)
+        # Initialbefüllung: gepinnte + laufende Apps
         windows = get_windows()
-        # Fensterklassen alle in Kleinbuchstaben
         running_classes = {w.get("class", "").lower() for w in windows if w.get("class")}
 
-        # gepinnte Apps aus Config (normalize to lowercase)
-        pinned = [p["class"].lower() for p in config.get("pinned_apps", [])]
-        # laufende, nicht-gepinnte Apps
+        pinned = [cls.lower() for cls in config.get("pinned_apps", [])]
         others = [cls for cls in running_classes if cls not in pinned]
 
-        # erste gepinnte, dann die übrigen laufenden
+        overrides = config.get("app_overrides", {})
+
         for cls in pinned + others:
+            ovr = overrides.get(cls, {})
+            exec_cmd  = ovr.get("exec", cls)
+            icon_path = ovr.get("icon")
+
             btn = AppButton(
                 app_class=cls,
-                exec_cmd=cls,
+                icon_path=icon_path,
+                exec_cmd=exec_cmd,
                 pinned=(cls in pinned),
                 config=config,
                 taskbar=self
             )
-            # grüne Markierung, wenn tatsächlich laufend
             btn.set_running(cls in running_classes)
-            # Fokussierung anhand case-insensitive Vergleich
             btn.set_focused(any(
                 w.get("class", "").lower() == cls and w.get("focused")
                 for w in windows
@@ -117,7 +114,7 @@ class Taskbar:
             self.buttons_map[cls] = btn
             self.task_order.append(cls)
 
-        # Drag & Drop Controller auf die Task-Box
+        # Drag & Drop zum Umordnen
         drop_target = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
         drop_target.connect("drop", self.on_drop)
         self.tasks_box.add_controller(drop_target)
@@ -126,10 +123,8 @@ class Taskbar:
         try:
             runtime = os.environ.get("XDG_RUNTIME_DIR", "")
             hypr_root = os.path.join(runtime, "hypr")
-            sig_dirs = [
-                d for d in os.listdir(hypr_root)
-                if os.path.isdir(os.path.join(hypr_root, d))
-            ]
+            sig_dirs = [d for d in os.listdir(hypr_root)
+                        if os.path.isdir(os.path.join(hypr_root, d))]
             his = sig_dirs[0]
             socket_path = os.path.join(hypr_root, his, ".socket2.sock")
             self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -139,7 +134,6 @@ class Taskbar:
         except Exception:
             pass
 
-        # erste Anzeige
         self._update_page_display()
 
     def on_page_up(self):
@@ -160,13 +154,15 @@ class Taskbar:
         if self.current_page > pages:
             self.current_page = pages
 
-        start = (self.current_page - 1) * self.PAGE_SIZE
+        start   = (self.current_page - 1) * self.PAGE_SIZE
         visible = self.task_order[start:start + self.PAGE_SIZE]
 
+        # Buttons außerhalb des Sichtbereichs entfernen
         for child in list(self.tasks_box):
             if isinstance(child, AppButton) and child.app_class not in visible:
                 self.tasks_box.remove(child)
 
+        # Sichtbare Buttons in richtiger Reihenfolge (prepend/insert)
         for idx, cls in enumerate(visible):
             btn = self.buttons_map[cls]
             if btn.get_parent() is None:
@@ -176,6 +172,7 @@ class Taskbar:
                     prev = visible[idx - 1]
                     self.tasks_box.insert_child_after(btn, self.buttons_map[prev])
 
+        # Paging-Pfeile zeigen/sensitiv setzen
         if pages > 1:
             self.page_up_button.set_visible(True)
             self.page_down_button.set_visible(True)
@@ -206,7 +203,8 @@ class Taskbar:
             _, _, cls, _ = args.split(",", 3)
             cls = cls.lower()
             if cls not in self.buttons_map:
-                btn = AppButton(cls, exec_cmd=cls, pinned=False, config=self.config, taskbar=self)
+                btn = AppButton(cls, exec_cmd=cls, pinned=False,
+                                config=self.config, taskbar=self)
                 self.buttons_map[cls] = btn
                 self.task_order.append(cls)
             self.buttons_map[cls].set_running(True)
@@ -214,7 +212,8 @@ class Taskbar:
         elif event == "closewindow":
             for cls, btn in list(self.buttons_map.items()):
                 if cls not in running:
-                    pinned = any(p["class"].lower() == cls for p in self.config.get("pinned_apps", []))
+                    pinned = any(p["class"].lower() == cls
+                                 for p in self.config.get("pinned_apps", []))
                     if pinned:
                         btn.set_running(False)
                     else:
@@ -230,7 +229,9 @@ class Taskbar:
         self._update_page_display()
 
     def on_drop(self, drop_target, value, x, y):
-        class_name = value.get_string() if isinstance(value, GObject.Value) else str(value)
+        class_name = (value.get_string()
+                      if isinstance(value, GObject.Value)
+                      else str(value))
         class_name = class_name.lower()
         if class_name not in self.buttons_map:
             return False
@@ -269,6 +270,7 @@ class Taskbar:
         pinned = [p["class"].lower() for p in config_data.get("pinned_apps", [])]
         if not pinned:
             return
+        # Nur die gepinnten Apps in Task-Reihenfolge übernehmen
         ordered = [cls for cls in self.task_order if cls in pinned]
         new_list = []
         for cls in ordered:
