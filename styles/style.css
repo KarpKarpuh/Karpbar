@@ -52,3 +52,67 @@
 .power-button:focus-visible {
     outline: none;
 }
+
+/* App-Buttons */
+.app-button {
+    border: none;
+    background: transparent;
+    padding: 4px;
+    margin: 0px;
+    transition: background-color 0.2s ease;
+}
+
+.app-button:hover {
+    background-color: rgba(255, 255, 255, 0.08); /* leichter Hover-Effekt */
+    border-radius: 8px;
+}
+
+/* Fokusiertes Fenster */
+.app-button.focused {
+    background-color: rgba(100, 150, 250, 0.15); /* Fokus-Hintergrund */
+    border-radius: 8px;
+}
+
+/* Laufende App Indikator */
+.indicator {
+    background: #4caf50; /* grün für laufende App */
+    border-radius: 1px;
+}
+
+/* Fallback-Label für Apps ohne Icon */
+.fallback-label {
+    font-weight: bold;
+    font-size: 14px;
+}
+
+/* Overflow-Button */
+.overflow-button {
+    border: none;
+    background: transparent;
+    font-size: 18px;
+    color: white;
+    transition: background-color 0.2s ease;
+}
+
+.overflow-button:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+}
+
+/* Overflow Menüeinträge */
+.overflow-app-item {
+    background: transparent;
+    border: none;
+    padding: 6px;
+}
+
+.overflow-app-item:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+}
+
+/* Taskbar Grundlayout */
+.taskbar {
+    background-color: #222; /* dunkler Hintergrund */
+    padding: 4px;
+}

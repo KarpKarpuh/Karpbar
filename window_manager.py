@@ -46,16 +46,45 @@ def focus_window_by_class(class_name):
         # Fehler ignorieren oder protokollieren
         print(f"Fehler beim Fokussieren von {class_name}: {e}")
 
-def close_window_by_class(class_name):
-    """
-    Schließt alle Fenster einer Anwendung anhand des Klassennamens via Hyprland.
-    Nutzt hyprctl dispatch closewindow mit Regex für exakten Klassenmatch.
-    Hinweis: Schließt ggf. mehrere Fenster der gleichen Klasse nacheinander.
-    """
-    # Regex ^class_name$ um exakten Match zu erzwingen (Hyprland interpretiert closewindow-Argument als Regex)
-    target = f"^{class_name}$"
+import subprocess
+import json
+
+def get_windows():
     try:
-        # Möglicherweise muss dieser Befehl mehrfach ausgeführt werden, um mehrere Fenster zu schließen.
-        subprocess.run(["hyprctl", "dispatch", "closewindow", target], check=True)
+        result = subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True, check=True)
+        windows = json.loads(result.stdout)
+        return windows
     except subprocess.CalledProcessError as e:
-        print(f"Fehler beim Schließen von Fenstern der Klasse {class_name}: {e}")
+        print(f"Fehler beim Abrufen der Fensterliste: {e}")
+        return []
+    except json.JSONDecodeError as e:
+        print(f"Fehler beim Parsen der Fensterliste: {e}")
+        return []
+
+def focus_window_by_class(app_class):
+    windows = get_windows()
+    for window in windows:
+        if window.get('class', '').lower() == app_class.lower():
+            window_id = window.get('address')
+            if window_id:
+                subprocess.run(["hyprctl", "dispatch", "focuswindow", f"address:{window_id}"])
+                print(f"[Debug] Fenster fokussiert: {app_class} (ID: {window_id})")
+                return
+    print(f"[Debug] Kein passendes Fenster zum Fokussieren gefunden für {app_class}.")
+
+def close_window_by_class(app_class):
+    windows = get_windows()
+    
+    print(f"[Debug] Offene Fenster beim Versuch, {app_class} zu schließen:")
+    for window in windows:
+        print(f" - CLASS: {window.get('class', '')} | TITLE: {window.get('title', '')}")
+
+    for window in windows:
+        window_class = window.get('class', '').lower()
+        if window_class == app_class.lower():
+            window_id = window.get('address')
+            if window_id:
+                subprocess.run(["hyprctl", "dispatch", "closewindow", f"address:{window_id}"])
+                print(f"[Debug] Fenster geschlossen: {window_class} (ID: {window_id})")
+                return
+    print(f"[Debug] Kein passendes Fenster für {app_class} gefunden.")

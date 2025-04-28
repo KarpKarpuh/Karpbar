@@ -1,16 +1,16 @@
 import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, Gdk, GdkPixbuf, GObject
+
 import subprocess
 import os
 
 from window_manager import get_windows, focus_window_by_class, close_window_by_class
 
-# Globales Dict zum Verwalten gestarteter Prozesse (optional)
 running_procs: dict[str, subprocess.Popen] = {}
 
 class AppButton(Gtk.Button):
-    def __init__(self, app_class, icon_path=None, exec_cmd=None, pinned=False, config=None):
+    def __init__(self, app_class, icon_path=None, exec_cmd=None, pinned=False, config=None, taskbar=None):
         super().__init__()
         self.app_class = app_class
         self.exec_cmd = exec_cmd or app_class
@@ -18,6 +18,7 @@ class AppButton(Gtk.Button):
         self.is_running = False
         self.is_focused = False
         self.config = config or {}
+        self.taskbar = taskbar
 
         self.icon_size = self.config.get("icon_size", 32)
         indicator_width = self.config.get("indicator_width", 8)
@@ -34,8 +35,7 @@ class AppButton(Gtk.Button):
                     height=self.icon_size,
                     preserve_aspect_ratio=True
                 )
-                image = Gtk.Image.new()
-                image.set_from_pixbuf(pixbuf)
+                image = Gtk.Image.new_from_pixbuf(pixbuf)
                 image.set_pixel_size(self.icon_size)
                 icon_widget = self._wrap_icon_widget(image)
             except Exception as e:
@@ -69,22 +69,21 @@ class AppButton(Gtk.Button):
         vbox.append(self.indicator)
         self.set_child(vbox)
 
-        # Linksklick: Start oder Fokus
         self.connect("clicked", self.on_left_click)
 
-        # Rechtsklick-Geste
         self.right_click = Gtk.GestureClick()
         self.right_click.set_button(3)
         self.right_click.connect("released", self.on_right_click)
         self.add_controller(self.right_click)
 
-        # Drag & Drop (Reihenfolge)
         drag_source = Gtk.DragSource()
         drag_source.set_actions(Gdk.DragAction.MOVE)
         drag_source.connect("prepare", self.on_drag_prepare)
+        drag_source.connect("drag-begin", self.on_drag_begin)
         self.add_controller(drag_source)
 
         self.icon_widget = icon_widget
+
         self._build_context_menu()
 
     def _wrap_icon_widget(self, widget):
@@ -123,13 +122,17 @@ class AppButton(Gtk.Button):
         self.popover = Gtk.Popover.new()
         menu_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
+        self.open_menu_item = Gtk.Button(label="App öffnen")
+        self.open_menu_item.connect("clicked", self.on_left_click)
+
         pin_label = "Entpinnen" if self.pinned else "Pinnen"
         self.pin_menu_item = Gtk.Button(label=pin_label)
         self.pin_menu_item.connect("clicked", self.on_menu_pin_toggled)
 
-        self.close_menu_item = Gtk.Button(label="Beenden")
+        self.close_menu_item = Gtk.Button(label="App schließen")
         self.close_menu_item.connect("clicked", self.on_menu_close)
 
+        menu_box.append(self.open_menu_item)
         menu_box.append(self.pin_menu_item)
         menu_box.append(self.close_menu_item)
 
@@ -137,19 +140,19 @@ class AppButton(Gtk.Button):
         self.popover.set_parent(self)
         self.popover.set_autohide(True)
 
+        self.close_menu_item.set_visible(False)
+        self.open_menu_item.set_visible(False)
+
     def on_left_click(self, button):
-        """Startet oder fokussiert die Anwendung."""
         exec_cmd = self.exec_cmd
         key = exec_cmd.split()[0].lower()
 
-        # Existierende Fenster prüfen
         windows = get_windows()
         if any(w.get("class", "").lower() == key for w in windows):
             focus_window_by_class(key)
             print(f"{key} läuft bereits und wurde fokussiert.")
             return
 
-        # Kein Fenster gefunden: neuen Prozess starten
         try:
             new_proc = subprocess.Popen(exec_cmd.split())
             running_procs[key] = new_proc
@@ -159,8 +162,6 @@ class AppButton(Gtk.Button):
 
     def on_right_click(self, gesture, n_press, x, y):
         if self.popover:
-            self.popover.set_pointing_to(None)
-            self.popover.set_relative_to(self)
             self.popover.popup()
 
     def on_menu_pin_toggled(self, button):
@@ -172,14 +173,12 @@ class AppButton(Gtk.Button):
                 app for app in config_data.get("pinned_apps", [])
                 if app.get("class") != self.app_class
             ]
+            if not self.is_running and self.taskbar:
+                self.taskbar.remove_app(self.app_class)
         else:
             self.pinned = True
             self.pin_menu_item.set_label("Entpinnen")
-            new_entry = {
-                "class": self.app_class,
-                "exec": self.exec_cmd,
-                "icon": None
-            }
+            new_entry = {"class": self.app_class, "exec": self.exec_cmd, "icon": None}
             config_data.setdefault("pinned_apps", []).append(new_entry)
 
     def on_menu_close(self, button):
@@ -190,7 +189,10 @@ class AppButton(Gtk.Button):
     def set_running(self, running):
         self.is_running = running
         self.indicator.set_visible(running)
+        if hasattr(self, "open_menu_item"):
+            self.open_menu_item.set_visible(not running)
         if hasattr(self, "close_menu_item"):
+            self.close_menu_item.set_visible(running)
             self.close_menu_item.set_sensitive(running)
 
     def set_focused(self, focused):
@@ -207,3 +209,18 @@ class AppButton(Gtk.Button):
         val.set_string(self.app_class)
         provider = Gdk.ContentProvider.new_for_value(val)
         return provider
+
+    def on_drag_begin(self, drag_source, drag):
+        drag_icon = Gtk.DragIcon.get_for_drag(drag)
+
+        if isinstance(self.icon_widget.get_first_child(), Gtk.Image):
+            image_copy = Gtk.Image.new_from_icon_name(self.app_class)
+            image_copy.set_pixel_size(self.icon_size)
+            drag_icon.set_child(image_copy)
+        else:
+            fallback_text = self.app_class[:2]
+            label_copy = Gtk.Label(label=fallback_text)
+            label_copy.set_halign(Gtk.Align.CENTER)
+            label_copy.set_valign(Gtk.Align.CENTER)
+            label_copy.add_css_class("fallback-label")
+            drag_icon.set_child(label_copy)

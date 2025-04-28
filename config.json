@@ -11,6 +11,33 @@
         },
         {
             "class": "mousepad"
+        },
+        {
+            "class": "mousepad2"
+        },
+        {
+            "class": "mousepad3"
+        },
+        {
+            "class": "mousepad4"
+        },
+        {
+            "class": "mousepad5"
+        },
+        {
+            "class": "mousepad6"
+        },
+        {
+            "class": "mousepad7"
+        },
+        {
+            "class": "mousepad8"
+        },
+        {
+            "class": "mousepad9"
+        },
+        {
+            "class": "mousepad10"
         }
     ]
 }
