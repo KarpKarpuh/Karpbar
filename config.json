@@ -4,40 +4,36 @@
     "icon_size": 32,
     "indicator_width": 14,
     "indicator_height": 3,
-
     "pinned_apps": [
         {
             "class": "firefox"
         },
         {
-            "class": "mousepad"
+            "class": "1"
         },
         {
-            "class": "mousepad2"
+            "class": "22"
         },
         {
-            "class": "mousepad3"
+            "class": "333"
         },
         {
-            "class": "mousepad4"
+            "class": "4444"
         },
         {
-            "class": "mousepad5"
+            "class": "55555"
         },
         {
-            "class": "mousepad6"
+            "class": "666666"
         },
         {
-            "class": "mousepad7"
+            "class": "7777777"
         },
         {
-            "class": "mousepad8"
+            "class": "88888888"
         },
         {
-            "class": "mousepad9"
-        },
-        {
-            "class": "mousepad10"
+            "class": "999999999"
         }
     ]
 }

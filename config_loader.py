@@ -1,3 +1,5 @@
+# config_loader.py
+
 import json
 import os
 
@@ -10,7 +12,6 @@ def load_config(path=None):
     """
     global config_data
     if path is None:
-        # Standardpfad relative zum Modul
         base_dir = os.path.dirname(__file__)
         path = os.path.join(base_dir, "config.json")
     try:
@@ -25,6 +26,19 @@ def get_config():
     Gibt die geladene Konfiguration zurück. Stellt sicher, dass zuvor load_config() aufgerufen wurde.
     """
     if not config_data:
-        # Falls noch nicht geladen, automatisch laden (Standardpfad)
         load_config()
     return config_data
+
+def save_config(path=None):
+    """
+    Speichert die aktuelle config_data zurück in die JSON-Datei.
+    """
+    global config_data
+    if path is None:
+        base_dir = os.path.dirname(__file__)
+        path = os.path.join(base_dir, "config.json")
+    try:
+        with open(path, 'w') as f:
+            json.dump(config_data, f, indent=4)
+    except Exception as e:
+        print(f"Fehler beim Speichern der Konfigurationsdatei: {e}", file=sys.stderr)

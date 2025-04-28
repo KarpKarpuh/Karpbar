@@ -6,6 +6,7 @@ import subprocess
 import os
 
 from window_manager import get_windows, focus_window_by_class, close_window_by_class
+from config_loader import config_data, save_config
 
 running_procs: dict[str, subprocess.Popen] = {}
 
@@ -26,7 +27,7 @@ class AppButton(Gtk.Button):
 
         self.add_css_class("app-button")
 
-        # Icon laden oder Fallback
+        # Icon laden oder Fallback erzeugen
         if icon_path:
             try:
                 pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
@@ -69,13 +70,16 @@ class AppButton(Gtk.Button):
         vbox.append(self.indicator)
         self.set_child(vbox)
 
+        # Klick-Handler
         self.connect("clicked", self.on_left_click)
 
+        # Rechtsklick-Geste
         self.right_click = Gtk.GestureClick()
         self.right_click.set_button(3)
         self.right_click.connect("released", self.on_right_click)
         self.add_controller(self.right_click)
 
+        # Drag & Drop
         drag_source = Gtk.DragSource()
         drag_source.set_actions(Gdk.DragAction.MOVE)
         drag_source.connect("prepare", self.on_drag_prepare)
@@ -83,7 +87,6 @@ class AppButton(Gtk.Button):
         self.add_controller(drag_source)
 
         self.icon_widget = icon_widget
-
         self._build_context_menu()
 
     def _wrap_icon_widget(self, widget):
@@ -91,13 +94,10 @@ class AppButton(Gtk.Button):
         box.set_size_request(self.icon_size, self.icon_size)
         box.set_valign(Gtk.Align.CENTER)
         box.set_halign(Gtk.Align.CENTER)
-
         widget.set_valign(Gtk.Align.CENTER)
         widget.set_halign(Gtk.Align.CENTER)
-
         if isinstance(widget, Gtk.Image):
             widget.set_pixel_size(self.icon_size)
-
         box.append(widget)
         return box
 
@@ -140,6 +140,7 @@ class AppButton(Gtk.Button):
         self.popover.set_parent(self)
         self.popover.set_autohide(True)
 
+        # Sichtbarkeit je nach Laufstatus
         self.close_menu_item.set_visible(False)
         self.open_menu_item.set_visible(False)
 
@@ -150,13 +151,11 @@ class AppButton(Gtk.Button):
         windows = get_windows()
         if any(w.get("class", "").lower() == key for w in windows):
             focus_window_by_class(key)
-            print(f"{key} läuft bereits und wurde fokussiert.")
             return
 
         try:
             new_proc = subprocess.Popen(exec_cmd.split())
             running_procs[key] = new_proc
-            print(f"{key} gestartet mit PID {new_proc.pid}.")
         except Exception as e:
             print(f"❌ Fehler beim Start von {key}: {e}")
 
@@ -165,21 +164,31 @@ class AppButton(Gtk.Button):
             self.popover.popup()
 
     def on_menu_pin_toggled(self, button):
-        from config_loader import config_data
-        if self.pinned:
+        """
+        Toggle Pin/Unpin mit 10er-Limit und sofortigem Speichern.
+        """
+        # Pinnen (falls noch nicht gepinnt)
+        if not self.pinned:
+            pinned_list = config_data.get("pinned_apps", [])
+            if len(pinned_list) >= 10:
+                print("⚠️ Maximal 10 Apps können angepinnt werden.")
+                return
+            self.pinned = True
+            self.pin_menu_item.set_label("Entpinnen")
+            new_entry = {"class": self.app_class, "exec": self.exec_cmd, "icon": None}
+            config_data.setdefault("pinned_apps", []).append(new_entry)
+            save_config()
+        # Entpinnen
+        else:
             self.pinned = False
             self.pin_menu_item.set_label("Pinnen")
             config_data["pinned_apps"] = [
                 app for app in config_data.get("pinned_apps", [])
                 if app.get("class") != self.app_class
             ]
+            save_config()
             if not self.is_running and self.taskbar:
                 self.taskbar.remove_app(self.app_class)
-        else:
-            self.pinned = True
-            self.pin_menu_item.set_label("Entpinnen")
-            new_entry = {"class": self.app_class, "exec": self.exec_cmd, "icon": None}
-            config_data.setdefault("pinned_apps", []).append(new_entry)
 
     def on_menu_close(self, button):
         close_window_by_class(self.app_class)
@@ -212,8 +221,8 @@ class AppButton(Gtk.Button):
 
     def on_drag_begin(self, drag_source, drag):
         drag_icon = Gtk.DragIcon.get_for_drag(drag)
-
-        if isinstance(self.icon_widget.get_first_child(), Gtk.Image):
+        first = self.icon_widget.get_first_child()
+        if isinstance(first, Gtk.Image):
             image_copy = Gtk.Image.new_from_icon_name(self.app_class)
             image_copy.set_pixel_size(self.icon_size)
             drag_icon.set_child(image_copy)
