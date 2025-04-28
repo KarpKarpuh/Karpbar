@@ -6,28 +6,25 @@
     "indicator_height": 3,
     "pinned_apps": [
         {
-            "class": "firefox"
-        },
-        {
             "class": "333"
         },
         {
-            "class": "1"
-        },
-        {
-            "class": "22"
-        },
-        {
-            "class": "4444"
-        },
-        {
             "class": "55555"
+        },
+        {
+            "class": "firefox"
         },
         {
             "class": "666666"
         },
         {
             "class": "7777777"
+        },
+        {
+            "class": "1"
+        },
+        {
+            "class": "22"
         }
     ]
 }

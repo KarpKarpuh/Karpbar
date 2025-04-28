@@ -10,6 +10,7 @@ from config_loader import config_data, save_config
 
 running_procs: dict[str, subprocess.Popen] = {}
 
+
 class AppButton(Gtk.Button):
     def __init__(self, app_class, icon_path=None, exec_cmd=None, pinned=False, config=None, taskbar=None):
         super().__init__()
@@ -124,17 +125,27 @@ class AppButton(Gtk.Button):
         self.popover = Gtk.Popover.new()
         menu_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
+        # „App öffnen“-Eintrag
         self.open_menu_item = Gtk.Button(label="App öffnen")
         self.open_menu_item.connect("clicked", self.on_left_click)
 
+        # „Neue Instanz öffnen“-Eintrag (initial versteckt)
+        self.new_instance_item = Gtk.Button(label="Neue Instanz öffnen")
+        self.new_instance_item.connect("clicked", self.on_open_new_instance)
+        self.new_instance_item.set_visible(False)
+
+        # Pinnen/Entpinnen
         pin_label = "Entpinnen" if self.pinned else "Pinnen"
         self.pin_menu_item = Gtk.Button(label=pin_label)
         self.pin_menu_item.connect("clicked", self.on_menu_pin_toggled)
 
+        # „App schließen“-Eintrag
         self.close_menu_item = Gtk.Button(label="App schließen")
         self.close_menu_item.connect("clicked", self.on_menu_close)
 
+        # Menü zusammenstellen
         menu_box.append(self.open_menu_item)
+        menu_box.append(self.new_instance_item)
         menu_box.append(self.pin_menu_item)
         menu_box.append(self.close_menu_item)
 
@@ -142,9 +153,10 @@ class AppButton(Gtk.Button):
         self.popover.set_parent(self)
         self.popover.set_autohide(True)
 
-        # Sichtbarkeit je nach Laufstatus
-        self.close_menu_item.set_visible(False)
+        # Anfangszustand: je nach Laufstatus sichtbar/unsichtbar
         self.open_menu_item.set_visible(False)
+        self.close_menu_item.set_visible(False)
+        # new_instance_item bleibt initial False
 
     def on_left_click(self, button):
         exec_cmd = self.exec_cmd
@@ -156,10 +168,17 @@ class AppButton(Gtk.Button):
             return
 
         try:
-            new_proc = subprocess.Popen(exec_cmd.split())
+            new_proc = subprocess.Popen(self.exec_cmd.split())
             running_procs[key] = new_proc
         except Exception as e:
             print(f"❌ Fehler beim Start von {key}: {e}")
+
+    def on_open_new_instance(self, button):
+        """Startet unabhängig vom Fokus eine weitere Instanz der App."""
+        try:
+            subprocess.Popen(self.exec_cmd.split())
+        except Exception as e:
+            print(f"❌ Fehler beim Start einer neuen Instanz von {self.app_class}: {e}")
 
     def on_right_click(self, gesture, n_press, x, y):
         if self.popover:
@@ -169,7 +188,6 @@ class AppButton(Gtk.Button):
         """
         Toggle Pin/Unpin mit 10er-Limit und sofortigem Speichern.
         """
-        # Pinnen (falls noch nicht gepinnt)
         if not self.pinned:
             pinned_list = config_data.get("pinned_apps", [])
             if len(pinned_list) >= 10:
@@ -180,7 +198,6 @@ class AppButton(Gtk.Button):
             new_entry = {"class": self.app_class, "exec": self.exec_cmd, "icon": None}
             config_data.setdefault("pinned_apps", []).append(new_entry)
             save_config()
-        # Entpinnen
         else:
             self.pinned = False
             self.pin_menu_item.set_label("Pinnen")
@@ -197,16 +214,22 @@ class AppButton(Gtk.Button):
         if self.popover:
             self.popover.popdown()
 
-    def set_running(self, running):
+    def set_running(self, running: bool):
+        """
+        Wird von außen aufgerufen, wenn sich der Laufstatus ändert.
+        Zeigt oder verbirgt Menüeinträge entsprechend.
+        """
         self.is_running = running
         self.indicator.set_visible(running)
-        if hasattr(self, "open_menu_item"):
-            self.open_menu_item.set_visible(not running)
-        if hasattr(self, "close_menu_item"):
-            self.close_menu_item.set_visible(running)
-            self.close_menu_item.set_sensitive(running)
 
-    def set_focused(self, focused):
+        # Wenn nicht läuft: „App öffnen“ zeigen
+        self.open_menu_item.set_visible(not running)
+        # Wenn läuft: „App schließen“ und „Neue Instanz öffnen“ zeigen
+        self.close_menu_item.set_visible(running)
+        self.close_menu_item.set_sensitive(running)
+        self.new_instance_item.set_visible(running)
+
+    def set_focused(self, focused: bool):
         self.is_focused = focused
         css = self.get_style_context()
         if focused:
