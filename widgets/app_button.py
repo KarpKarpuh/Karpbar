@@ -51,7 +51,7 @@ class AppButton(Gtk.Button):
             else:
                 icon_widget = self._build_fallback_icon()
 
-        self.set_size_request(self.icon_size + 4, self.icon_size + 10)
+        self.set_size_request(self.icon_size, self.icon_size)
         self.set_valign(Gtk.Align.FILL)
         self.set_halign(Gtk.Align.CENTER)
 
@@ -64,8 +64,10 @@ class AppButton(Gtk.Button):
 
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         vbox.set_halign(Gtk.Align.CENTER)
-        vbox.set_valign(Gtk.Align.CENTER)
-        vbox.set_size_request(self.icon_size + 4, self.icon_size + 10)
+        vbox.set_valign(Gtk.Align.END)
+        extra_padding = 2
+        total_height = self.icon_size + indicator_height + extra_padding
+        vbox.set_size_request(self.icon_size + 4, total_height)
         vbox.append(icon_widget)
         vbox.append(self.indicator)
         self.set_child(vbox)

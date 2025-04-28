@@ -1,7 +1,6 @@
-# taskbar.py
+# widgets/taskbar.py
 
 import os
-import errno
 import socket
 import math
 from gi.repository import Gtk, Gdk, GLib, GObject
@@ -17,51 +16,82 @@ class Taskbar:
         self.task_order = []
         self.current_page = 1
 
-        # Haupt-Container mit Spacer für rechtsbündige Icons
+        # Haupt-Container als horizontiale Box
         self.container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        spacer = Gtk.Box()
-        spacer.set_hexpand(True)
-        self.container.append(spacer)
+        self.container.set_margin_top(0)
+        self.container.set_margin_bottom(0)
+        # linker Spacer: verschiebt alles ab Bildschirmmitte nach linksbündig
+        self.left_spacer = Gtk.Box()
+        # Primärmonitor-Breite ermitteln:
+        display = Gdk.Display.get_default()
+        half_width = 0
+        if display:
+            monitors = display.get_monitors()  # Liste aller Monitore :contentReference[oaicite:2]{index=2}
+            if monitors.get_n_items() > 0:
+                primary = monitors.get_item(0)
+                geom = primary.get_geometry()   # Geometrie des Monitors :contentReference[oaicite:3]{index=3}
+                half_width = geom.width // 2
+        # Breiten-Mindestanforderung setzen (Höhe flexibel)
+        self.left_spacer.set_size_request(half_width, -1)
+        self.container.append(self.left_spacer)
 
         # Box für App-Buttons
         self.tasks_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self.container.append(self.tasks_box)
 
-        # Pfeil-Buttons für Seitenwechsel
-        btn_width = config.get("button_width", 36)
-        btn_height = config.get("button_height", 36)
-        self.page_up_button = Gtk.Button(label="▲")
-        self.page_up_button.set_size_request(btn_width, btn_height)
+        # Vertikale Box für die Pfeiltasten
+        arrow_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        # Pfeiltasten ganz unten anordnen und Abstand entfernen
+        arrow_box.set_valign(Gtk.Align.END)
+        arrow_box.set_margin_bottom(0)
+        arrow_box.set_margin_top(0)
+        # Page-Up Button
+        up_icon = Gtk.Image.new_from_icon_name("go-up-symbolic")
+        up_icon.set_pixel_size(18)
+        self.page_up_button = Gtk.Button()
         self.page_up_button.add_css_class("page-arrow")
+        self.page_up_button.set_child(up_icon)
         self.page_up_button.connect("clicked", lambda _: self.on_page_up())
-        self.page_up_button.set_visible(False)
-        self.container.append(self.page_up_button)
+        arrow_box.append(self.page_up_button)
 
-        self.page_down_button = Gtk.Button(label="▼")
-        self.page_down_button.set_size_request(btn_width, btn_height)
+        # Page-Down Button
+        down_icon = Gtk.Image.new_from_icon_name("go-down-symbolic")
+        down_icon.set_pixel_size(18)
+        self.page_down_button = Gtk.Button()
         self.page_down_button.add_css_class("page-arrow")
+        self.page_down_button.set_child(down_icon)
         self.page_down_button.connect("clicked", lambda _: self.on_page_down())
+        arrow_box.append(self.page_down_button)
+
+        # Pfeiltasten initial ausblenden
+        self.page_up_button.set_visible(False)
         self.page_down_button.set_visible(False)
-        self.container.append(self.page_down_button)
+
+        self.container.append(arrow_box)
+
+        # rechter Spacer: schiebt Power-Button ans rechte Ende
+        right_spacer = Gtk.Box()
+        right_spacer.set_hexpand(True)
+        self.container.append(right_spacer)
 
         # Power-Button (Shutdown)
         power_icon = Gtk.Image.new_from_icon_name("system-shutdown")
-        power_icon.set_pixel_size(config.get("icon_size", 32))
+        power_icon.set_pixel_size(24)
         power_button = Gtk.Button()
         power_button.set_child(power_icon)
         power_button.add_css_class("power-button")
+        power_button.set_size_request(20, 20)
         power_button.connect("clicked", lambda _: Gtk.Application.get_default().quit())
         self.container.append(power_button)
 
+        # Styling und Export als Widget
         self.container.add_css_class("taskbar")
         self.widget = self.container
 
-        # Initiale Buttons: zuerst gepinnte in gespeicherter Reihenfolge, dann laufende
+        # Initialbefüllung: gepinnte Apps, dann laufende
         pinned = [p["class"] for p in config.get("pinned_apps", [])]
         running = [w.get("class") for w in get_windows() if w.get("class") not in pinned]
-        all_initial = pinned + running
-
-        for cls in all_initial:
+        for cls in pinned + running:
             btn = AppButton(
                 app_class=cls,
                 exec_cmd=cls,
@@ -70,33 +100,37 @@ class Taskbar:
                 taskbar=self
             )
             btn.set_running(cls in running)
-            btn.set_focused(any(w.get("class") == cls and w.get("focused") for w in get_windows()))
+            btn.set_focused(any(
+                w.get("class") == cls and w.get("focused")
+                for w in get_windows()
+            ))
             self.tasks_box.append(btn)
             self.buttons_map[cls] = btn
             self.task_order.append(cls)
 
-        # Drag & Drop Controller
+        # Drag & Drop Controller auf die Task-Box
         drop_target = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
         drop_target.connect("drop", self.on_drop)
         self.tasks_box.add_controller(drop_target)
 
-        # Hyprland-IPC Socket einrichten
-        runtime = os.environ.get("XDG_RUNTIME_DIR")
-        hypr_root = os.path.join(runtime or "", "hypr")
+        # Hyprland-IPC Socket für Fenster-Events
         try:
-            sig_dirs = [d for d in os.listdir(hypr_root) if os.path.isdir(os.path.join(hypr_root, d))]
+            runtime = os.environ.get("XDG_RUNTIME_DIR", "")
+            hypr_root = os.path.join(runtime, "hypr")
+            sig_dirs = [
+                d for d in os.listdir(hypr_root)
+                if os.path.isdir(os.path.join(hypr_root, d))
+            ]
             his = sig_dirs[0]
             socket_path = os.path.join(hypr_root, his, ".socket2.sock")
-
             self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             self.sock.setblocking(False)
             self.sock.connect(socket_path)
             GLib.io_add_watch(self.sock, GLib.IO_IN, self._on_ipc_event)
-        except Exception as e:
-            # Ignoriere falls Socket nicht verfügbar
+        except Exception:
             pass
 
-        # Erste Anzeige aktualisieren
+        # erste Anzeige
         self._update_page_display()
 
     def on_page_up(self):
@@ -118,25 +152,24 @@ class Taskbar:
             self.current_page = pages
 
         start = (self.current_page - 1) * self.PAGE_SIZE
-        end = start + self.PAGE_SIZE
-        visible = self.task_order[start:end]
+        visible = self.task_order[start:start + self.PAGE_SIZE]
 
-        # Entferne Buttons, die nicht auf dieser Seite liegen
+        # entferne nicht sichtbare Buttons
         for child in list(self.tasks_box):
             if isinstance(child, AppButton) and child.app_class not in visible:
                 self.tasks_box.remove(child)
 
-        # Füge fehlende Buttons in korrekter Reihenfolge ein
+        # füge fehlende Buttons in Reihenfolge ein
         for idx, cls in enumerate(visible):
-            btn = self.buttons_map.get(cls)
-            if btn and btn.get_parent() is None:
+            btn = self.buttons_map[cls]
+            if btn.get_parent() is None:
                 if idx == 0:
                     self.tasks_box.prepend(btn)
                 else:
                     prev = visible[idx - 1]
                     self.tasks_box.insert_child_after(btn, self.buttons_map[prev])
 
-        # Seiten-Pfeile steuern
+        # Pfeiltasten nur bei mehreren Seiten anzeigen
         if pages > 1:
             self.page_up_button.set_visible(True)
             self.page_down_button.set_visible(True)
@@ -148,10 +181,11 @@ class Taskbar:
 
     def _on_ipc_event(self, source, condition):
         try:
-            data = source.recv(4096).decode().splitlines()
+            raw = source.recv(4096).decode().splitlines()
         except BlockingIOError:
             return True
-        for line in data:
+
+        for line in raw:
             if ">>" not in line:
                 continue
             event, args = line.split(">>", 1)
@@ -160,7 +194,7 @@ class Taskbar:
 
     def _handle_event(self, event, args):
         current = get_windows()
-        running = {w.get("class") for w in current if w.get("class")}
+        running = {w["class"] for w in current if w.get("class")}
 
         if event == "openwindow":
             _, _, cls, _ = args.split(",", 3)
@@ -173,7 +207,7 @@ class Taskbar:
         elif event == "closewindow":
             for cls, btn in list(self.buttons_map.items()):
                 if cls not in running:
-                    pinned = any(p.get("class") == cls for p in self.config.get("pinned_apps", []))
+                    pinned = any(p["class"] == cls for p in self.config.get("pinned_apps", []))
                     if pinned:
                         btn.set_running(False)
                     else:
@@ -198,7 +232,7 @@ class Taskbar:
         if dragged in children:
             children.remove(dragged)
 
-        # Bestimme neue Position
+        # neue Position bestimmen
         new_idx = len(children)
         for idx, child in enumerate(children):
             alloc = child.get_allocation()
@@ -210,9 +244,9 @@ class Taskbar:
         if old_idx < new_idx:
             new_idx -= 1
         self.task_order.remove(class_name)
-        self.task_order.insert(max(0, new_idx), class_name)
+        self.task_order.insert(new_idx, class_name)
 
-        # Visuell neu anordnen
+        # visuelles Re-Layout
         self.tasks_box.remove(dragged)
         if new_idx == 0:
             self.tasks_box.prepend(dragged)
