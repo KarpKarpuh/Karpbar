@@ -1,18 +1,20 @@
 import os
 import errno
+import socket
 from gi.repository import Gtk, GLib, GObject
 from widgets.app_button import AppButton
-from window_manager import get_windows, focus_window_by_class, close_window_by_class
+from window_manager import get_windows
 
 class Taskbar:
     """
-    Karpbar Taskbar – event-getrieben mit Hyprland-IPC (.socket2.sock), inkl. automatischem Retry bei Verbindungsfehlern.
+    Karpbar Taskbar: Event-getrieben über Hyprland-IPC (.socket2.sock).
+    Dynamische Updates: Open, Close und Focus mit set_running und set_focused.
     """
     def __init__(self, config):
         self.config = config
         self.buttons_map = {}
 
-        # Box für App-Buttons
+        # Container für App-Buttons
         self.tasks_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
 
         # Power-Button rechts
@@ -31,10 +33,11 @@ class Taskbar:
         self.container.add_css_class("taskbar")
         self.widget = self.container
 
-        # Initial Buttons für bereits geöffnete Fenster
-        for win in get_windows():
-            cls = win.get("class")
-            if not cls or cls in self.buttons_map:
+        # Initial Buttons für bereits geöffnete Fenster (inklusive gepinnter)
+        current_windows = get_windows()
+        current_classes = {w.get("class") for w in current_windows if w.get("class")}
+        for cls in current_classes.union({p.get("class") for p in config.get("pinned_apps", [])}):
+            if not cls:
                 continue
             btn = AppButton(
                 app_class=cls,
@@ -42,67 +45,79 @@ class Taskbar:
                 pinned=any(p.get("class") == cls for p in config.get("pinned_apps", [])),
                 config=config
             )
-            btn.set_running(True)
-            btn.set_focused(win.get("focused", False))
+            is_running = cls in current_classes
+            btn.set_running(is_running)
+            focused = any(w.get("class") == cls and w.get("focused") for w in current_windows)
+            btn.set_focused(focused)
             self.tasks_box.append(btn)
             self.buttons_map[cls] = btn
 
-        # IPC-Socket initialisieren (mit Retry bei Fehler)
-        GLib.timeout_add_seconds(1, self._init_ipc_watch)
-
-    def _init_ipc_watch(self):
+        # Hyprland-IPC Socket2: als Unix-Domain-Stream verbinden
         runtime = os.environ.get("XDG_RUNTIME_DIR")
         hypr_root = os.path.join(runtime, "hypr")
         try:
-            sig_dirs = [
-                d for d in os.listdir(hypr_root)
-                if os.path.isdir(os.path.join(hypr_root, d))
-            ]
-            his = sig_dirs[0]  # Nimm erste gefundene Instanz-Signatur
+            sig_dirs = [d for d in os.listdir(hypr_root)
+                        if os.path.isdir(os.path.join(hypr_root, d))]
+            his = sig_dirs[0]  # erste gefundene Instanz-Signatur
             socket_path = os.path.join(hypr_root, his, ".socket2.sock")
-            fd = os.open(socket_path, os.O_RDONLY | os.O_NONBLOCK)
-            GLib.io_add_watch(fd, GLib.IO_IN, self._on_ipc_event)
+
+            # Unix-Domain-Stream-Socket öffnen & verbinden
+            self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.sock.setblocking(False)
+            self.sock.connect(socket_path)
+
+            # Callback bei eingehenden Daten
+            GLib.io_add_watch(self.sock, GLib.IO_IN, self._on_ipc_event)
         except OSError as e:
-            # ENOENT (2) = Datei fehlt, ENXIO (6) = kein Listener / keine Adresse
             if e.errno in (errno.ENOENT, errno.ENXIO):
-                # versuche in 1 Sekunde erneut
-                return True  # Timeout bleibt aktiv
+                print(f"⚠️ Hyprland-IPC Socket nicht bereit: {socket_path}")
             else:
                 print(f"⚠️ Fehler beim Öffnen des IPC-Sockets: {e}")
-        return False  # Timeout entfernen, wenn erfolgreich oder bei anderem Fehler
 
-    def _on_ipc_event(self, fd, condition):
+    def _on_ipc_event(self, source, condition):
         try:
-            data = os.read(fd, 4096).decode().splitlines()
+            data = source.recv(4096).decode().splitlines()
         except BlockingIOError:
             return True
         for line in data:
-            if "\u003e\u003e" not in line:
+            if ">>" not in line:
                 continue
             event, args = line.split(">>", 1)
             self._handle_event(event, args.strip())
         return True
 
     def _handle_event(self, event, args):
+        current_windows = get_windows()
+        running_classes = {w.get("class") for w in current_windows if w.get("class")}
+
+        # Neues Fenster geöffnet
         if event == "openwindow":
-            addr, ws, cls, title = args.split(",", 3)
-            if cls in self.buttons_map:
-                self.buttons_map[cls].set_running(True)
-            else:
+            _, _, cls, _ = args.split(",", 3)
+            if cls not in self.buttons_map:
                 btn = AppButton(app_class=cls, exec_cmd=cls, pinned=False, config=self.config)
-                btn.set_running(True)
                 self.tasks_box.append(btn)
                 self.buttons_map[cls] = btn
+            self.buttons_map[cls].set_running(True)
 
+        # Fenster geschlossen
         elif event == "closewindow":
-            current = {w["class"] for w in get_windows()}
+            addr = args
+            # Für alle Buttons prüfen
             for cls, btn in list(self.buttons_map.items()):
-                if cls not in current and not any(
-                    p.get("class") == cls for p in self.config.get("pinned_apps", [])
-                ):
-                    self.tasks_box.remove(btn)
-                    del self.buttons_map[cls]
+                pinned = any(p.get("class") == cls for p in self.config.get("pinned_apps", []))
+                if cls in running_classes:
+                    # weiterhin laufend
+                    btn.set_running(True)
+                else:
+                    if pinned:
+                        # gepinnt, aber nicht mehr laufend -> nur Indikator ausschalten
+                        btn.set_running(False)
+                    else:
+                        # nicht gepinnt und nicht laufend -> Button entfernen
+                        self.tasks_box.remove(btn)
+                        del self.buttons_map[cls]
 
+        # Fokus geändert
         elif event in ("activewindow", "activewindowv2"):
             cls = args.split(",", 1)[0]
             for c, btn in self.buttons_map.items():
